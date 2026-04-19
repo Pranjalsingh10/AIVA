@@ -4,10 +4,10 @@ import tensorflow as tf
 import pickle
 import re
 
-# Load emotion model
+# Load model
 model = tf.keras.models.load_model("model/emotion_glove_model.keras")
 
-# Load tokenizer + label encoder (IMPORTANT)
+# Load tokenizer + encoder
 with open("model/tokenizer.pkl", "rb") as f:
     tokenizer = pickle.load(f)
 
@@ -16,20 +16,21 @@ with open("model/label_encoder.pkl", "rb") as f:
 
 max_len = 100
 
-# Clean text
 def clean_text(text):
     text = text.lower()
     text = re.sub(r"[^a-zA-Z ]", "", text)
     return text
 
-# Predict emotion
+# ---------------- EMOTION PREDICTION ----------------
 def predict_emotion(text):
     text = clean_text(text)
+
     seq = tokenizer.texts_to_sequences([text])
     pad = tf.keras.preprocessing.sequence.pad_sequences(seq, maxlen=max_len)
 
     pred = model.predict(pad, verbose=0)
-    confidence = np.max(pred)
+
+    confidence = float(np.max(pred))
     emotion = le.inverse_transform([np.argmax(pred)])[0]
 
     if confidence < 0.5:
@@ -37,24 +38,43 @@ def predict_emotion(text):
 
     return f"{emotion} ({confidence:.2f})"
 
-# Speech to text
-def listen_and_predict():
+# ---------------- IMPROVED SPEECH FUNCTION ----------------
+def listen_and_predict(retries=3):
     recognizer = sr.Recognizer()
 
-    with sr.Microphone() as source:
-        print("🎤 Speak something...")
-        recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source)
+    # IMPORTANT: improves accuracy
+    recognizer.dynamic_energy_threshold = True
+    recognizer.pause_threshold = 0.8
 
-    try:
-        text = recognizer.recognize_google(audio)
-        print("You said:", text)
+    for attempt in range(retries):
+        try:
+            with sr.Microphone() as source:
+                print("🎤 Listening... (attempt", attempt + 1, ")")
 
-        emotion = predict_emotion(text)
-        return emotion
+                # 🔥 stabilize noise
+                recognizer.adjust_for_ambient_noise(source, duration=1)
 
-    except sr.UnknownValueError:
-        return "Could not understand"
+                # prevents hanging forever
+                audio = recognizer.listen(
+                    source,
+                    timeout=5,
+                    phrase_time_limit=8
+                )
 
-    except sr.RequestError:
-        return "API error"
+            text = recognizer.recognize_google(audio)
+
+            print("🗣 You said:", text)
+
+            emotion = predict_emotion(text)
+            return emotion
+
+        except sr.WaitTimeoutError:
+            print("⚠ No speech detected, retrying...")
+
+        except sr.UnknownValueError:
+            print("⚠ Could not understand, retrying...")
+
+        except sr.RequestError:
+            return "API error"
+
+    return "Failed to capture speech after retries"
