@@ -17,9 +17,19 @@ with open("model/label_encoder.pkl", "rb") as f:
 max_len = 100
 
 def clean_text(text):
-    text = text.lower()
-    text = re.sub(r"[^a-zA-Z ]", "", text)
-    return text
+    text = text.lower().strip()
+
+    # remove extra spaces early
+    text = re.sub(r"\s+", " ", text)
+
+    # remove noise
+    text = re.sub(r"[^a-zA-Z'\s]", "", text)
+
+    # remove very short noise words
+    words = text.split()
+    words = [w for w in words if len(w) > 1]
+
+    return " ".join(words)
 
 def predict_emotion(text):
     text = clean_text(text)
